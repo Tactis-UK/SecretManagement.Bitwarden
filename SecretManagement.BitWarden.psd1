@@ -1,6 +1,6 @@
 @{
     # Script module or binary module file associated with this manifest.
-    RootModule = 'SecretManagement.BitWarden.psm1'
+    RootModule = 'SecretManagement.Bitwarden.psm1'
 
     # Version number of this module.
     ModuleVersion = '0.2.0'
@@ -57,7 +57,7 @@
     PrivateData       = @{
         PSData = @{
             # Tags applied to this module. These help with module discovery in online galleries.
-            Tags = 'SecretManagement', 'Secrets', 'BitWarden', 'MacOS', 'Linux', 'Windows'
+            Tags = 'SecretManagement', 'Secrets', 'Bitwarden', 'MacOS', 'Linux', 'Windows'
             # A URL to the main website for this project.
             ProjectUri = 'https://github.com/friedITguy/SecretManagement.Bitwarden'
             # A URL to the license for this module.

@@ -70,7 +70,7 @@ For example, if you have a 64-bit Windows 11 system, you would copy the `bitward
 ├── 📁 Dependencies/
 │   └── 📁 bin/
 │       └── 📁 Release/
-│           └── 📁 net9.0/
+│           └── 📁 net10.0/
 │               └── 📁 publish/
 │                   ├── 📁 runtimes/
 │                   │   ├── 📁 linux-x64
@@ -171,6 +171,117 @@ In this example, the secret with an `ID` equal to `34131270-8dbd-49e0-bc02-7ca57
 Set-Secret -Name "ExampleSecret" -Vault Bitwarden
 ```
 In this example, the secret with a `Name` equal to `ExampleSecret` would be updated. However, if one did not exist a new secret would be created with the `Name` equal to `ExampleSecret`.
+
+## Build the Module
+
+This module depends on the C# Bitwarden Secrets Manager SDK package:
+
+```xml
+<PackageReference Include="Bitwarden.Secrets.Sdk" Version="1.0.0" />
+```
+
+The SDK includes platform-specific native libraries. The `build.ps1` script publishes the dependency project for each supported runtime and stages a multi-platform PowerShell module package.
+
+Supported runtimes:
+
+- `osx-arm64`
+- `osx-x64`
+- `linux-x64`
+- `win-x64`
+
+### Build for All Supported Platforms
+
+From the repository root:
+
+```pwsh
+pwsh ./build.ps1
+```
+
+The script will:
+
+1. Publish `Dependencies/Dependencies.csproj` for each runtime.
+2. Collect `Bitwarden.Sdk.dll`.
+3. Collect each native runtime library:
+   - `libbitwarden_c.dylib`
+   - `libbitwarden_c.so`
+   - `bitwarden_c.dll`
+4. Stage the publishable module under:
+
+```text
+dist/SecretManagement.Bitwarden
+```
+
+The staged module contains this layout:
+
+```text
+dist/SecretManagement.Bitwarden/
+├── SecretManagement.Bitwarden.psd1
+├── SecretManagement.Bitwarden.psm1
+├── lib/
+│   └── Bitwarden.Sdk.dll
+└── runtimes/
+    ├── osx-arm64/
+    │   └── native/
+    │       └── libbitwarden_c.dylib
+    ├── osx-x64/
+    │   └── native/
+    │       └── libbitwarden_c.dylib
+    ├── linux-x64/
+    │   └── native/
+    │       └── libbitwarden_c.so
+    └── win-x64/
+        └── native/
+            └── bitwarden_c.dll
+```
+
+This produces one PowerShell module package containing all supported native runtime libraries.
+
+## Publish the Module
+
+Register your private repository first if needed:
+
+```pwsh
+Register-PSRepository `
+  -Name '<repo-name>' `
+  -SourceLocation '<nuget-feed-url>' `
+  -PublishLocation '<nuget-feed-url>' `
+  -InstallationPolicy Trusted
+```
+
+Then build and publish:
+
+```pwsh
+pwsh ./build.ps1 -Publish -Repository '<repo-name>' -NuGetApiKey '<api-key>'
+```
+
+To build without publishing:
+
+```pwsh
+pwsh ./build.ps1
+```
+
+## Build Script Options
+
+```pwsh
+pwsh ./build.ps1 `
+  -Configuration Release `
+  -Framework net10.0 `
+  -RuntimeIdentifiers osx-arm64,osx-x64,linux-x64,win-x64
+```
+
+Defaults:
+
+```text
+Configuration      Release
+Framework          net10.0
+RuntimeIdentifiers osx-arm64, osx-x64, linux-x64, win-x64
+```
+
+## Notes
+
+The native Bitwarden SDK binaries are not compiled by this module. They are provided by the `Bitwarden.Secrets.Sdk` NuGet package and are collected during `dotnet publish`.
+
+The module is multi-platform because it packages all supported native runtime libraries and loads the appropriate one at runtime.
 
 ## Legal
 >[!IMPORTANT]

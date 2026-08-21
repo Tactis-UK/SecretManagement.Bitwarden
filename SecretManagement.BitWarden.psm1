@@ -26,7 +26,8 @@ function Import-BitwardenSdk {
     $platform = switch -Wildcard ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) {
         "*Windows*" { "win" }
         "*Linux*"   { "linux" }
-        "*Darwin*"  { "osx" } # MacOS is identified as Darwin
+        "*Darwin*"  { "osx" }
+        "*macOS*"   { "osx" }
         Default     { throw "The operating system your system is running is not supported by the .NET version of the Bitwarden SDK. Supported operating systems are Windows, MacOS, and Linux." }
     }
     $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
@@ -40,24 +41,47 @@ function Import-BitwardenSdk {
     $runtime = "$platform-$architecture"
     
     # Verify
-    if($supportedRuntimes -notcontains $runtime){throw "The operating system and processor architecture combination you're running is not a valid runtime for the .NET version of the Bitwarden SDK. Supported runtimes are $($supportedRuntimes -join ', ')."}
-    
+    if ($supportedRuntimes -notcontains $runtime) {
+        throw "The operating system and processor architecture combination you're running is not a valid runtime for the .NET version of the Bitwarden SDK. Supported runtimes are $($supportedRuntimes -join ', ')."
+    }
+
     # If we got here then the system is running on a supported runtime for the Bitwarden SDK
-    # Try to load the libraries from the module's lib folder
     $libPath = Join-Path -Path $PSScriptRoot -ChildPath 'lib'
     $sdkPath = Join-Path -Path $libPath -ChildPath 'Bitwarden.Sdk.dll'
-    $nativeLibPath = Join-Path -Path $libPath -ChildPath $nativeLibraries.$runtime
+    $nativeLibPath = Join-Path -Path $PSScriptRoot -ChildPath "runtimes/$runtime/native/$($nativeLibraries.$runtime)"
 
-    # Verify the lib directory exists, throw an error if not
-    if(-not (Test-Path -Path $libPath)){ throw "The 'lib' directory could not be found within this module. We expected it to be located inside '$($PSScriptRoot)'" }
+    if (-not (Test-Path -Path $libPath)) {
+        throw "The 'lib' directory could not be found within this module. We expected it to be located inside '$($PSScriptRoot)'"
+    }
 
-    # Verify the Bitwarden SDK and the appropraite native library files are present
-    $sdkFile = Test-Path -Path $sdkPath -ErrorAction SilentlyContinue
-    $nativeLibFile = Test-Path -Path $nativeLibPath -ErrorAction SilentlyContinue
+    if (-not (Test-Path -Path $sdkPath -ErrorAction SilentlyContinue)) {
+        throw "The required Bitwarden.Sdk.dll file could not be found within the '$($libPath)' directory."
+    }
 
-    if(-not $sdkFile){ throw "The required Bitwarden.Sdk.dll file could not be found within the '$($libPath)' directory." }
-    if(-not $nativeLibFile){ throw "The required '$($nativeLibraries.$runtime)' file could not be found within the '$($libPath)' directory." }
-    
-    # Load the Bitwarden.Secrets.Sdk to the PowerShell Session
-    Add-Type -Path $sdkPath -ErrorAction Stop
+    if (-not (Test-Path -Path $nativeLibPath -ErrorAction SilentlyContinue)) {
+        throw "The required '$($nativeLibraries.$runtime)' file could not be found at '$nativeLibPath'."
+    }
+
+    $sdkTypes = Add-Type -Path $sdkPath -PassThru -ErrorAction Stop
+    $sdkAssembly = $sdkTypes[0].Assembly
+    $nativeLibPathForResolver = $nativeLibPath
+
+    [System.Runtime.InteropServices.NativeLibrary]::SetDllImportResolver(
+        $sdkAssembly,
+        {
+            param (
+                [string] $libraryName,
+                [System.Reflection.Assembly] $assembly,
+                [System.Nullable[System.Runtime.InteropServices.DllImportSearchPath]] $searchPath
+            )
+
+            if ($libraryName -in @('bitwarden_c', 'bitwarden_c.dll', 'libbitwarden_c.so', 'libbitwarden_c.dylib')) {
+                return [System.Runtime.InteropServices.NativeLibrary]::Load($nativeLibPathForResolver)
+            }
+
+            return [IntPtr]::Zero
+        }.GetNewClosure()
+    )
+
+    $script:BitwardenSdkLoaded = $true
 }

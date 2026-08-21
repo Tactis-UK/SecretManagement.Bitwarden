@@ -439,7 +439,7 @@ function Unlock-SecretVault {
                 $script:BitwardenSdkLoaded = $true
             }catch{
                 $script:BitwardenSdkLoaded = $false
-                throw throw [System.InvalidOperationException]::new("Unable to load the Bitwarden SDK")
+                throw [System.InvalidOperationException]::new("Unable to load the Bitwarden SDK: $($_.Exception.Message)")
             }
         }
         
