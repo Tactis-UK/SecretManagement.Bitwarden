@@ -23,17 +23,17 @@ function Import-BitwardenSdk {
     }
 
     # Determine the OS and Processor Architecture
-    $platform = switch -Wildcard ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) {
-        "*Windows*" { "win" }
-        "*Linux*"   { "linux" }
-        "*Darwin*"  { "osx" }
-        "*macOS*"   { "osx" }
-        Default     { throw "The operating system your system is running is not supported by the .NET version of the Bitwarden SDK. Supported operating systems are Windows, MacOS, and Linux." }
+    $platform = switch ($true) {
+        $IsWindows { 'win'; break }
+        $IsLinux   { 'linux'; break }
+        $IsMacOS   { 'osx'; break }
+        default    { throw "The operating system your system is running is not supported by the .NET version of the Bitwarden SDK. Supported operating systems are Windows, macOS, and Linux." }
     }
-    $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-        "X64"  { "x64" }
-        "Arm64" { "arm64" }
-        Default { throw "The processor architecture your system is running is not supported by the .NET version of the Bitwarden SDK. Supported architectures are x64 and arm64." }
+
+    $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture) {
+        'X64'   { 'x64' }
+        'Arm64' { 'arm64' }
+        default { throw "The processor architecture your system is running is not supported by the .NET version of the Bitwarden SDK. Supported architectures are x64 and arm64." }
     }
 
     # Determine if the Runtime is supported
