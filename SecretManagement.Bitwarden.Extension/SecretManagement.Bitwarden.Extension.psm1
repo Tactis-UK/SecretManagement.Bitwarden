@@ -4,6 +4,22 @@ using namespace Microsoft.PowerShell.SecretManagement
 $script:BitwardenSecretsClient = $null
 $script:BitwardenSdkLoaded = $false
 
+# Secrets.List only returns identifiers (Id, Key, OrganizationId) for everything the access token can read,
+# so fetch the full secrets and keep only those that belong to the vault's ProjectId
+function Get-ProjectSecret {
+    param (
+        [object] $VaultParameters,
+        [guid[]] $Id
+    )
+
+    if (-not $Id) { return }
+
+    # Not $Private: so the Where-Object script block can see it
+    $projectId = [guid]$VaultParameters.ProjectId
+    $Private:secrets = $script:BitwardenSecretsClient.Secrets.GetByIds($Id)
+    $Private:secrets.Data | Where-Object { $_.ProjectId -eq $projectId }
+}
+
 function Get-Secret {
     [CmdletBinding()]
     param (
@@ -40,11 +56,11 @@ function Get-Secret {
             throw [System.ArgumentException]::new("Unable to find a secret with an 'Id' matching the provided 'Name' parameter.")
         }
         
-        # Get the secret from the vault
-        $Private:secret = $script:BitwardenSecretsClient.Secrets.Get($Private:secretMatch[0].Id.Guid)
+        # Get the secret from the vault, limited to the vault's project
+        $Private:secret = Get-ProjectSecret -VaultParameters $vaultInfo.VaultParameters -Id $Private:secretMatch.Id | Select-Object -First 1
 
         if (-not $Private:secret) {
-            throw [System.ArgumentException]::new("Unable to find a secret with an 'Id' matching the provided 'Name' parameter.")
+            throw [System.ArgumentException]::new("Unable to find a secret matching the provided 'Name' parameter in project '$($vaultInfo.VaultParameters.ProjectId)'.")
         }
 
         if (-not $Private:secret.Value) {
@@ -128,16 +144,15 @@ function Set-Secret {
 
         # Find secret with a matching Name or ID
         $Private:existingSecretMatch = $Private:allSecrets.Data | Where-Object {($_.Id -eq $Name) -or ($_.Key -eq $Name)}
-        
 
-        if ($Private:existingSecretMatch) {
-            # Get the full details of the exisitng secret
-            $Private:existingSecret = $script:BitwardenSecretsClient.Secrets.Get($Private:existingSecretMatch[0].Id.Guid)
+        # Only update a secret in the vault's project, so a same-named secret elsewhere isn't moved into it
+        $Private:existingSecret = Get-ProjectSecret -VaultParameters $vaultInfo.VaultParameters -Id $Private:existingSecretMatch.Id | Select-Object -First 1
 
+        if ($Private:existingSecret) {
             # Update existing secret
             $null = $Script:BitwardenSecretsClient.Secrets.Update(
                 $vaultInfo.VaultParameters.OrganizationId,
-                $Private:existingSecret[0].Id.Guid,
+                $Private:existingSecret.Id.Guid,
                 $Name,
                 $Private:secretValue,
                 $Private:existingSecret.Note ?? "",
@@ -220,7 +235,12 @@ function Remove-Secret {
         if (-not $Private:existingSecret) {
             throw [System.ArgumentException]::new("Unable to find a secret with an 'Id' matching the provided 'Name' parameter.")
         }
-        
+
+        # Refuse to delete secrets outside the vault's project
+        if ($Private:existingSecret.ProjectId -ne [guid]$vaultInfo.VaultParameters.ProjectId) {
+            throw [System.ArgumentException]::new("The secret '$Name' does not belong to project '$($vaultInfo.VaultParameters.ProjectId)'.")
+        }
+
         # Get the full details of the exisitng secret
         $null = $script:BitwardenSecretsClient.Secrets.Delete(@($Private:existingSecret.Id.Guid))
         return $?
@@ -280,27 +300,30 @@ function Get-SecretInfo {
             Write-Error "Unable to access screts in your Secrets Manager vault" -ErrorAction Stop
         }
         
-        $Private:return = @()
-        foreach ($Private:secretMatch in $private:allSecrets.Data) {
-            if (($private:pattern.IsMatch($Private:secretMatch.Key)) -or ($private:pattern.IsMatch($Private:secretMatch.Id.Guid))) {
-                $Private:secret = $script:BitwardenSecretsClient.Secrets.Get($Private:secretMatch.Id.Guid)
-                $Private:metadata = @{
-                    'Id' = $Private:secret.Id.Guid
-                    'Key' = $Private:secret.Key
-                    'CreatedDate' = $Private:secret.CreationDate
-                    'RevisionDate' = $Private:secret.RevisionDate
-                    'Note' = $Private:secret.Note
-                }
-                
-                Write-Output (
-                    [Microsoft.PowerShell.SecretManagement.SecretInformation]::new(
-                        $Private:secret.Id.Guid, # Name of Secret
-                        [Microsoft.PowerShell.SecretManagement.SecretType]::SecureString, # Indicates that Get-Secret will return a SecureString
-                        $VaultName, # Name of vault
-                        $Private:metadata # Optional metadata
-                    )
-                )
+        # Match the filter against the identifiers, then fetch only the matches in the vault's project
+        $Private:secretMatch = foreach ($Private:identifier in $private:allSecrets.Data) {
+            if (($private:pattern.IsMatch($Private:identifier.Key)) -or ($private:pattern.IsMatch($Private:identifier.Id.Guid))) {
+                $Private:identifier
             }
+        }
+
+        foreach ($Private:secret in (Get-ProjectSecret -VaultParameters $vaultInfo.VaultParameters -Id $Private:secretMatch.Id)) {
+            $Private:metadata = @{
+                'Id' = $Private:secret.Id.Guid
+                'Key' = $Private:secret.Key
+                'CreatedDate' = $Private:secret.CreationDate
+                'RevisionDate' = $Private:secret.RevisionDate
+                'Note' = $Private:secret.Note
+            }
+            
+            Write-Output (
+                [Microsoft.PowerShell.SecretManagement.SecretInformation]::new(
+                    $Private:secret.Id.Guid, # Name of Secret
+                    [Microsoft.PowerShell.SecretManagement.SecretType]::SecureString, # Indicates that Get-Secret will return a SecureString
+                    $VaultName, # Name of vault
+                    $Private:metadata # Optional metadata
+                )
+            )
         }
         
     } catch [System.UnauthorizedAccessException] {
